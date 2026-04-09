@@ -1,62 +1,82 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Accounting Journal Entry Game</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auburn Accounting Game</title>
+  <link rel="stylesheet" href="./styles.css?v=11" />
 </head>
 <body>
-  <header class="header">
-    <h1>Journal Entry → Financial Statements</h1>
-    <div id="score" class="pill">Score: 0</div>
-  </header>
+  <div id="landingPage" class="landing-page">
+    <div class="landing-card">
+      <p class="eyebrow">Auburn Accounting Game</p>
+      <h1>Journal Entry Practice</h1>
+      <p class="learning-objective">
+        You will practice translating simple business events into properly formatted
+        journal entries using correct account classifications and debit/credit rules.
+      </p>
+      <button id="startGame" class="primary large-button" type="button">Start Game</button>
+    </div>
+  </div>
 
-  <main class="grid">
-    <section class="card">
-      <h2>Transaction</h2>
-      <div id="txPrompt" class="prompt"></div>
-      <div class="row">
-        <button id="prevTx">◀</button>
-        <button id="nextTx">Next Transaction ▶</button>
+  <div id="gameWrapper" class="app-shell is-hidden">
+    <header class="header">
+      <div>
+        <h1>How Journal Entries Flow to Financial Statements</h1>
+        <p class="subhead">Auburn University Accounting Game</p>
       </div>
-      <div id="feedback" class="feedback"></div>
-    </section>
+      <div id="score" class="pill">Score: 0</div>
+    </header>
 
-    <section class="card">
-      <h2>Journal Entry</h2>
-      <div id="jeLines"></div>
-      <div class="row">
-        <button id="addLine">+ Add line</button>
-        <button id="clearJE">Clear</button>
-        <button id="postJE" class="primary">Post Entry</button>
-      </div>
-      <div class="totals">
-        <div>Debits: <span id="debits">0</span></div>
-        <div>Credits: <span id="credits">0</span></div>
-        <div id="balanced" class="pill">Not Balanced</div>
-      </div>
-    </section>
+    <main class="grid">
+      <section class="card">
+        <h2>Transaction</h2>
+        <div id="txPrompt" class="prompt"></div>
+      </section>
 
-    <section class="card wide">
-      <h2>Financial Statements (Live)</h2>
-      <div class="statements">
-        <div>
-          <h3>Income Statement</h3>
-          <pre id="incomeStmt"></pre>
+      <section class="card">
+        <h2>Journal Entry</h2>
+        <div id="jeLines"></div>
+
+        <div class="row">
+          <button id="addLine" type="button">+ Add line</button>
+          <button id="clearJE" type="button">Clear</button>
+          <button id="postJE" class="primary" type="button">Post Entry</button>
         </div>
-        <div>
-          <h3>Balance Sheet</h3>
-          <pre id="balanceSheet"></pre>
-        </div>
-        <div>
-          <h3>Statement of Stockholders' Equity</h3>
-          <pre id="equityStmt"></pre>
-        </div>
-      </div>
-    </section>
-  </main>
 
-  <script type="module" src="./app.js"></script>
+        <div class="totals">
+          <span>Debits: <strong id="debits">0</strong></span>
+          <span>Credits: <strong id="credits">0</strong></span>
+          <span id="balanced" class="status-bad">Not Balanced</span>
+        </div>
+
+        <div id="feedback" class="feedback"></div>
+      </section>
+
+      <section class="card wide">
+        <h2>Financial Statements</h2>
+        <div class="statements">
+          <section class="statement-panel">
+            <div id="incomeStmt" class="statement-box"></div>
+          </section>
+
+          <section class="statement-panel">
+            <div id="balanceSheet" class="statement-box"></div>
+          </section>
+
+          <section class="statement-panel">
+            <div id="equityStmt" class="statement-box"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+  
+  <script type="module" src="./app.js?v=11"></script><div id="resultsOverlay" class="results-overlay is-hidden">
+  <div class="results-card">
+    <h2 id="resultTitle">Round Complete</h2>
+    <p id="resultMessage"></p>
+    <button id="playAgainBtn" class="primary large-button" type="button">Play Again</button>
+  </div>
 </body>
 </html>
