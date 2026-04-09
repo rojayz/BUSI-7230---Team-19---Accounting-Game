@@ -3,253 +3,526 @@ import { TRANSACTIONS } from "./data/transactions.js";
 
 const $ = (id) => document.getElementById(id);
 
-let score = 0;
 let txIndex = 0;
+let gameTransactions = [];
+let answeredTransactions = new Set();
+let lockedTransactions = new Set();
+let correctAnswers = 0;
 
-// Ledger stores debit-positive balances
-const ledger = Object.fromEntries(COA.map(a => [a.id, 0]));
+// Internal ledger uses debit-positive balances
+const ledger = Object.fromEntries(COA.map((account) => [account.id, 0]));
 
-// Current JE lines being built
 let je = [newLine(), newLine()];
 
 function newLine() {
-  return { accountId: COA[0].id, dc:"D", amount:0 };
+  return {
+    accountId: COA[0].id,
+    dc: "D",
+    amount: 0
+  };
 }
 
-function fmt(n) {
-  const sign = n < 0 ? "-" : "";
-  const abs = Math.abs(n);
-  return sign + abs.toLocaleString(undefined, { maximumFractionDigits: 0 });
+function shuffleArray(array) {
+  const copy = [...array];
+
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+
+  return copy;
 }
 
-function accountById(id) {
-  return COA.find(a => a.id === id);
+function getRandomTransactions(allTransactions, count) {
+  return shuffleArray(allTransactions).slice(0, count);
+}
+
+function displayAmount(account) {
+  if (!account) return 0;
+  return account.normal === "D" ? account.bal : -account.bal;
+}
+
+function totals() {
+  const d = je
+    .filter((line) => line.dc === "D")
+    .reduce((sum, line) => sum + Number(line.amount || 0), 0);
+
+  const c = je
+    .filter((line) => line.dc === "C")
+    .reduce((sum, line) => sum + Number(line.amount || 0), 0);
+
+  return { d, c };
+}
+
+function moneyHTML(n) {
+  const abs = Math.abs(n).toLocaleString();
+  return n < 0 ? `($${abs})` : `$${abs}`;
+}
+
+function rowHTML(label, amount, options = {}) {
+  const labelClass = options.indent ? "statement-label indent" : "statement-label";
+  const rowClass = options.rowClass ? `statement-row ${options.rowClass}` : "statement-row";
+
+  return `
+    <div class="${rowClass}">
+      <div class="${labelClass}">${label}</div>
+      <div class="statement-amount">${moneyHTML(amount)}</div>
+    </div>
+  `;
+}
+
+function currentTransaction() {
+  return gameTransactions[txIndex];
 }
 
 function renderTransaction() {
-  const tx = TRANSACTIONS[txIndex];
-  $("txPrompt").textContent = `${txIndex+1}/${TRANSACTIONS.length} — ${tx.prompt}`;
-  $("feedback").textContent = "";
+  const tx = currentTransaction();
+
+  if (!tx) {
+    $("txPrompt").textContent = "No transaction available.";
+    return;
+  }
+
+  $("txPrompt").textContent = `Question ${txIndex + 1} of ${gameTransactions.length} — ${tx.prompt}`;
+  updateButtonStates();
 }
 
 function renderJELines() {
   const container = $("jeLines");
   container.innerHTML = "";
 
+  const tx = currentTransaction();
+  const locked = tx ? lockedTransactions.has(tx.id) : false;
+
   je.forEach((line, i) => {
-    const div = document.createElement("div");
-    div.className = "je-line";
+    const wrapper = document.createElement("div");
+    wrapper.className = "je-line";
 
-    const sel = document.createElement("select");
-    COA.forEach(a => {
-      const opt = document.createElement("option");
-      opt.value = a.id;
-      opt.textContent = a.name;
-      if (a.id === line.accountId) opt.selected = true;
-      sel.appendChild(opt);
+    const accountSelect = document.createElement("select");
+    accountSelect.disabled = locked;
+
+    COA.forEach((account) => {
+      const option = document.createElement("option");
+      option.value = account.id;
+      option.textContent = account.name;
+      option.selected = account.id === line.accountId;
+      accountSelect.appendChild(option);
     });
-    sel.onchange = (e) => { je[i].accountId = e.target.value; renderTotals(); };
 
-    const dc = document.createElement("select");
-    ["D","C"].forEach(v => {
-      const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = v === "D" ? "Debit" : "Credit";
-      if (v === line.dc) opt.selected = true;
-      dc.appendChild(opt);
+    accountSelect.addEventListener("change", (event) => {
+      je[i].accountId = event.target.value;
+      renderTotals();
     });
-    dc.onchange = (e) => { je[i].dc = e.target.value; renderTotals(); };
 
-    const amt = document.createElement("input");
-    amt.type = "number";
-    amt.min = "0";
-    amt.step = "1";
-    amt.value = line.amount;
-    amt.oninput = (e) => { je[i].amount = Number(e.target.value || 0); renderTotals(); };
+    const dcSelect = document.createElement("select");
+    dcSelect.disabled = locked;
 
-    const rm = document.createElement("button");
-    rm.className = "remove";
-    rm.textContent = "✕";
-    rm.onclick = () => { je.splice(i,1); renderJELines(); renderTotals(); };
+    [
+      { value: "D", label: "Debit" },
+      { value: "C", label: "Credit" }
+    ].forEach((item) => {
+      const option = document.createElement("option");
+      option.value = item.value;
+      option.textContent = item.label;
+      option.selected = item.value === line.dc;
+      dcSelect.appendChild(option);
+    });
 
-    div.appendChild(sel);
-    div.appendChild(dc);
-    div.appendChild(amt);
-    div.appendChild(rm);
-    container.appendChild(div);
+    dcSelect.addEventListener("change", (event) => {
+      je[i].dc = event.target.value;
+      renderTotals();
+    });
+
+    const amountInput = document.createElement("input");
+    amountInput.type = "number";
+    amountInput.min = "0";
+    amountInput.step = "1";
+    amountInput.value = line.amount;
+    amountInput.disabled = locked;
+
+    amountInput.addEventListener("input", (event) => {
+      je[i].amount = Number(event.target.value || 0);
+      renderTotals();
+    });
+
+    const removeButton = document.createElement("button");
+    removeButton.className = "remove";
+    removeButton.type = "button";
+    removeButton.textContent = "✕";
+    removeButton.disabled = locked;
+
+    removeButton.addEventListener("click", () => {
+      if (locked) return;
+      if (je.length <= 1) return;
+
+      je.splice(i, 1);
+      renderJELines();
+      renderTotals();
+    });
+
+    wrapper.appendChild(accountSelect);
+    wrapper.appendChild(dcSelect);
+    wrapper.appendChild(amountInput);
+    wrapper.appendChild(removeButton);
+
+    container.appendChild(wrapper);
   });
 
   renderTotals();
 }
 
-function totals() {
-  const d = je.filter(l=>l.dc==="D").reduce((s,l)=>s+l.amount,0);
-  const c = je.filter(l=>l.dc==="C").reduce((s,l)=>s+l.amount,0);
-  return { d, c };
-}
-
 function renderTotals() {
   const { d, c } = totals();
-  $("debits").textContent = d.toLocaleString();
-  $("credits").textContent = c.toLocaleString();
-  const ok = d > 0 && d === c;
-  $("balanced").textContent = ok ? "Balanced" : "Not Balanced";
-  $("balanced").style.color = ok ? "var(--ok)" : "var(--bad)";
+  const isBalanced = d > 0 && d === c;
+
+  $("debits").textContent = moneyHTML(d);
+  $("credits").textContent = moneyHTML(c);
+  $("balanced").textContent = isBalanced ? "Balanced" : "Not Balanced";
+  $("balanced").className = isBalanced ? "status-good" : "status-bad";
 }
 
 function postToLedger(lines) {
-  // debit-positive posting
   for (const line of lines) {
-    const amt = Number(line.amount || 0);
-    ledger[line.accountId] += (line.dc === "D" ? +amt : -amt);
+    const amount = Number(line.amount || 0);
+    ledger[line.accountId] += line.dc === "D" ? amount : -amount;
   }
 }
 
 function linesEqualAsMultiset(a, b) {
-  // compare (accountId, dc, amount) regardless of ordering
-  const norm = (xs) => xs
-    .map(x => `${x.accountId}|${x.dc}|${Number(x.amount)}`)
-    .sort()
-    .join(";");
-  return norm(a) === norm(b);
+  const normalize = (lines) =>
+    lines
+      .map((line) => `${line.accountId}|${line.dc}|${Number(line.amount)}`)
+      .sort()
+      .join(";");
+
+  return normalize(a) === normalize(b);
 }
 
 function buildStatements() {
-  const byType = (type) => COA.filter(a => a.type === type).map(a => ({...a, bal: ledger[a.id]}));
-
-  // Display balance in "normal" direction
-  const display = (a) => {
-    // For credit-normal accounts, a negative internal bal means credit.
-    // Convert so that normal direction shows positive.
-    const normal = a.normal;
-    const val = normal === "D" ? a.bal : -a.bal;
-    return val;
-  };
+  const byType = (type) =>
+    COA
+      .filter((account) => account.type === type)
+      .map((account) => ({
+        ...account,
+        bal: ledger[account.id]
+      }));
 
   const assets = byType("asset");
-  const liab = byType("liability");
-  const eq = byType("equity");
-  const rev = byType("revenue");
-  const exp = byType("expense");
+  const liabilities = byType("liability");
+  const equityAccounts = byType("equity");
+  const revenues = byType("revenue");
+  const expenses = byType("expense");
 
-  const total = (arr) => arr.reduce((s,a)=>s+display(a),0);
+  const totalDisplayed = (accounts) =>
+    accounts.reduce((sum, account) => sum + displayAmount(account), 0);
 
-  const revTotal = total(rev);
-  const expTotal = total(exp);
+  const revTotal = totalDisplayed(revenues);
+  const expTotal = totalDisplayed(expenses);
   const netIncome = revTotal - expTotal;
 
-  // Equity statement: Begin RE = 0 for MVP
-  const dividends = display(eq.find(a=>a.id==="div") ?? {normal:"D", bal:0});
-  const endRE = 0 + netIncome - dividends;
+  const dividends = displayAmount(
+    equityAccounts.find((account) => account.id === "div") ?? { normal: "D", bal: 0 }
+  );
 
-  const bsAssets = total(assets);
-  const bsLiab = total(liab);
+  const commonStock = displayAmount(
+    equityAccounts.find((account) => account.id === "cs") ?? { normal: "C", bal: 0 }
+  );
 
-  // Equity section: contributed capital + RE - Div (Div already in equity ledger; for statement we show explicitly)
-  const commonStock = display(eq.find(a=>a.id==="cs") ?? {normal:"C", bal:0});
-  const retainedEarnings = endRE;
-
-  const bsEquity = commonStock + retainedEarnings; // (div already netted into endRE)
+  const endRE = netIncome - dividends;
+  const bsAssets = totalDisplayed(assets);
+  const bsLiabilities = totalDisplayed(liabilities);
+  const bsEquity = commonStock + endRE;
 
   return {
-    income: { rev, exp, revTotal, expTotal, netIncome },
-    balance: { assets, liab, bsAssets, bsLiab, bsEquity },
-    equity: { commonStock, beginRE:0, netIncome, dividends, endRE }
+    income: {
+      revenues,
+      expenses,
+      revTotal,
+      expTotal,
+      netIncome
+    },
+    balance: {
+      assets,
+      liabilities,
+      bsAssets,
+      bsLiabilities,
+      bsEquity
+    },
+    equity: {
+      commonStock,
+      beginRE: 0,
+      netIncome,
+      dividends,
+      endRE
+    }
   };
 }
 
 function renderStatements() {
-  const s = buildStatements();
+  const statements = buildStatements();
 
-  const linesIS = [];
-  linesIS.push("REVENUES");
-  for (const a of s.income.rev) linesIS.push(`  ${a.name}: ${fmt(safeDisplay(a))}`);
-  linesIS.push(`Total Revenues: ${fmt(s.income.revTotal)}`);
-  linesIS.push("");
-  linesIS.push("EXPENSES");
-  for (const a of s.income.exp) linesIS.push(`  ${a.name}: ${fmt(safeDisplay(a))}`);
-  linesIS.push(`Total Expenses: ${fmt(s.income.expTotal)}`);
-  linesIS.push("");
-  linesIS.push(`Net Income: ${fmt(s.income.netIncome)}`);
-  $("incomeStmt").textContent = linesIS.join("\n");
+  $("incomeStmt").innerHTML = `
+    <div class="statement-title">Income Statement</div>
+    <div class="statement-subtitle">For the Current Round</div>
 
-  const linesBS = [];
-  linesBS.push("ASSETS");
-  for (const a of s.balance.assets) linesBS.push(`  ${a.name}: ${fmt(safeDisplay(a))}`);
-  linesBS.push(`Total Assets: ${fmt(s.balance.bsAssets)}`);
-  linesBS.push("");
-  linesBS.push("LIABILITIES");
-  for (const a of s.balance.liab) linesBS.push(`  ${a.name}: ${fmt(safeDisplay(a))}`);
-  linesBS.push(`Total Liabilities: ${fmt(s.balance.bsLiab)}`);
-  linesBS.push("");
-  linesBS.push("EQUITY");
-  linesBS.push(`  Common Stock: ${fmt(s.equity.commonStock)}`);
-  linesBS.push(`  Retained Earnings: ${fmt(s.equity.endRE)}`);
-  linesBS.push(`Total Equity: ${fmt(s.balance.bsEquity)}`);
-  linesBS.push("");
-  linesBS.push(`A = L + E ?  ${fmt(s.balance.bsAssets)} = ${fmt(s.balance.bsLiab)} + ${fmt(s.balance.bsEquity)}`);
-  $("balanceSheet").textContent = linesBS.join("\n");
+    <div class="statement-section">
+      <div class="statement-section-label">Revenues</div>
+      ${statements.income.revenues
+        .map((account) => rowHTML(account.name, displayAmount(account), { indent: true }))
+        .join("")}
+      ${rowHTML("Total Revenues", statements.income.revTotal, { rowClass: "statement-total" })}
+    </div>
 
-  const linesSE = [];
-  linesSE.push("Contributed Capital");
-  linesSE.push(`  Common Stock: ${fmt(s.equity.commonStock)}`);
-  linesSE.push("");
-  linesSE.push("Retained Earnings");
-  linesSE.push(`  Beginning RE: ${fmt(s.equity.beginRE)}`);
-  linesSE.push(`  + Net Income: ${fmt(s.equity.netIncome)}`);
-  linesSE.push(`  - Dividends: ${fmt(s.equity.dividends)}`);
-  linesSE.push(`  Ending RE: ${fmt(s.equity.endRE)}`);
-  $("equityStmt").textContent = linesSE.join("\n");
+    <div class="statement-section">
+      <div class="statement-section-label">Expenses</div>
+      ${statements.income.expenses
+        .map((account) => rowHTML(account.name, displayAmount(account), { indent: true }))
+        .join("")}
+      ${rowHTML("Total Expenses", statements.income.expTotal, { rowClass: "statement-total" })}
+    </div>
 
-  function safeDisplay(a){
-    // mirror display() but scoped here
-    return a.normal === "D" ? a.bal : -a.bal;
+    <div class="statement-section">
+      ${rowHTML("Net Income", statements.income.netIncome, { rowClass: "statement-grand-total" })}
+    </div>
+  `;
+
+  $("balanceSheet").innerHTML = `
+    <div class="statement-title">Balance Sheet</div>
+    <div class="statement-subtitle">Current Position</div>
+
+    <div class="statement-section">
+      <div class="statement-section-label">Assets</div>
+      ${statements.balance.assets
+        .map((account) => rowHTML(account.name, displayAmount(account), { indent: true }))
+        .join("")}
+      ${rowHTML("Total Assets", statements.balance.bsAssets, { rowClass: "statement-total" })}
+    </div>
+
+    <div class="statement-section">
+      <div class="statement-section-label">Liabilities</div>
+      ${statements.balance.liabilities
+        .map((account) => rowHTML(account.name, displayAmount(account), { indent: true }))
+        .join("")}
+      ${rowHTML("Total Liabilities", statements.balance.bsLiabilities, { rowClass: "statement-total" })}
+    </div>
+
+    <div class="statement-section">
+      <div class="statement-section-label">Stockholders' Equity</div>
+      ${rowHTML("Common Stock", statements.equity.commonStock, { indent: true })}
+      ${rowHTML("Retained Earnings", statements.equity.endRE, { indent: true })}
+      ${rowHTML("Total Equity", statements.balance.bsEquity, { rowClass: "statement-total" })}
+    </div>
+
+    <div class="statement-eq">
+      Assets = Liabilities + Equity<br>
+      ${moneyHTML(statements.balance.bsAssets)} = ${moneyHTML(statements.balance.bsLiabilities)} + ${moneyHTML(statements.balance.bsEquity)}
+    </div>
+  `;
+
+  $("equityStmt").innerHTML = `
+    <div class="statement-title">Statement of Stockholders' Equity</div>
+    <div class="statement-subtitle">For the Current Round</div>
+
+    <div class="statement-section">
+      <div class="statement-section-label">Contributed Capital</div>
+      ${rowHTML("Common Stock", statements.equity.commonStock, { indent: true })}
+    </div>
+
+    <div class="statement-section">
+      <div class="statement-section-label">Retained Earnings</div>
+      ${rowHTML("Beginning Retained Earnings", statements.equity.beginRE, { indent: true })}
+      ${rowHTML("Add: Net Income", statements.equity.netIncome, { indent: true })}
+      ${rowHTML("Less: Dividends", statements.equity.dividends, { indent: true })}
+      ${rowHTML("Ending Retained Earnings", statements.equity.endRE, { rowClass: "statement-grand-total" })}
+    </div>
+  `;
+}
+
+function updateScoreDisplay() {
+  $("score").textContent = `Score: ${correctAnswers} / ${gameTransactions.length}`;
+}
+
+function updateButtonStates() {
+  const tx = currentTransaction();
+  if (!tx) return;
+
+  const locked = lockedTransactions.has(tx.id);
+
+  $("postJE").disabled = locked;
+  $("addLine").disabled = locked;
+  $("clearJE").disabled = locked;
+}
+
+function resetJEForNextQuestion() {
+  je = [newLine(), newLine()];
+  renderJELines();
+}
+
+function clearFeedback() {
+  $("feedback").textContent = "";
+  $("feedback").className = "feedback";
+}
+
+function getFinalMessage(score) {
+  if (score <= 5) {
+    return `You scored a ${score} out of 10. You need to review these transactions more.`;
+  }
+
+  if (score >= 6 && score <= 8) {
+    return `You scored a ${score} out of 10. You're on your way to knowing how to record these transactions but could use a little more practice.`;
+  }
+
+  if (score === 9) {
+    return `You scored a ${score} out of 10. You're almost at 100, keep it up!`;
+  }
+
+  return `WOW! You got them all correct! Go have a drink on Dr. Brandon.`;
+}
+
+function showResultsOverlay() {
+  $("resultTitle").textContent = "Round Complete";
+  $("resultMessage").textContent = getFinalMessage(correctAnswers);
+  $("resultsOverlay").classList.remove("is-hidden");
+}
+
+function hideResultsOverlay() {
+  $("resultsOverlay").classList.add("is-hidden");
+}
+
+function finishGame() {
+  $("txPrompt").textContent = "Game Complete";
+  $("feedback").textContent = "";
+  $("feedback").className = "feedback";
+  updateButtonStates();
+  showResultsOverlay();
+}
+
+function moveToNextTransaction() {
+  if (txIndex < gameTransactions.length - 1) {
+    txIndex += 1;
+    resetJEForNextQuestion();
+    clearFeedback();
+    renderTransaction();
+    updateButtonStates();
+  } else {
+    finishGame();
   }
 }
 
 function tryPostJE() {
-  const { d, c } = totals();
-  if (!(d > 0 && d === c)) {
-    $("feedback").textContent = "Entry must balance before posting.";
-    $("feedback").style.color = "var(--bad)";
+  const tx = currentTransaction();
+
+  if (!tx) return;
+
+  if (lockedTransactions.has(tx.id)) {
+    $("feedback").textContent = "This transaction is already locked.";
+    $("feedback").className = "feedback";
     return;
   }
 
-  const tx = TRANSACTIONS[txIndex];
+  const { d, c } = totals();
 
-  // Normalize JE lines: remove zeros
-  const clean = je.filter(l => Number(l.amount) > 0);
+  if (!(d > 0 && d === c)) {
+    $("feedback").textContent = "Entry must balance before posting.";
+    $("feedback").className = "feedback error";
+    return;
+  }
 
-  const correct = linesEqualAsMultiset(clean, tx.entry);
+  const cleanLines = je.filter((line) => Number(line.amount) > 0);
+  const correct = linesEqualAsMultiset(cleanLines, tx.entry);
+
+  answeredTransactions.add(tx.id);
+  lockedTransactions.add(tx.id);
 
   if (correct) {
-    score += 10;
-    $("feedback").textContent = `✅ Correct! Posted. ${tx.explain}`;
-    $("feedback").style.color = "var(--ok)";
-    postToLedger(clean);
+    correctAnswers += 1;
+    $("feedback").textContent = `✅ Correct! ${tx.explain}`;
+    $("feedback").className = "feedback success";
+    postToLedger(cleanLines);
     renderStatements();
-    $("score").textContent = `Score: ${score}`;
   } else {
-    score -= 2;
-    $("feedback").textContent = `❌ Not quite. Hint: think about which accounts change and their normal balances.`;
-    $("feedback").style.color = "var(--bad)";
-    $("score").textContent = `Score: ${score}`;
+    $("feedback").textContent = `❌ Incorrect. ${tx.explain}`;
+    $("feedback").className = "feedback error";
   }
+
+  updateScoreDisplay();
+  renderTransaction();
+  renderJELines();
+
+  setTimeout(() => {
+    if (answeredTransactions.size === gameTransactions.length) {
+      finishGame();
+    } else {
+      moveToNextTransaction();
+    }
+  }, 1500);
 }
 
-$("addLine").onclick = () => { je.push(newLine()); renderJELines(); };
-$("clearJE").onclick = () => { je = [newLine(), newLine()]; renderJELines(); };
-$("postJE").onclick = tryPostJE;
+function showGame() {
+  $("landingPage").classList.add("is-hidden");
+  $("gameWrapper").classList.remove("is-hidden");
+}
 
-$("nextTx").onclick = () => {
-  txIndex = Math.min(txIndex + 1, TRANSACTIONS.length - 1);
-  renderTransaction();
-};
-$("prevTx").onclick = () => {
-  txIndex = Math.max(txIndex - 1, 0);
-  renderTransaction();
-};
+function restartGame() {
+  hideResultsOverlay();
 
-renderTransaction();
-renderJELines();
-renderStatements();
+  txIndex = 0;
+  gameTransactions = getRandomTransactions(TRANSACTIONS, 10);
+  answeredTransactions = new Set();
+  lockedTransactions = new Set();
+  correctAnswers = 0;
+
+  Object.keys(ledger).forEach((key) => {
+    ledger[key] = 0;
+  });
+
+  je = [newLine(), newLine()];
+
+  updateScoreDisplay();
+  renderTransaction();
+  renderJELines();
+  renderStatements();
+  clearFeedback();
+}
+
+function bindEvents() {
+  $("startGame").addEventListener("click", showGame);
+
+  $("addLine").addEventListener("click", () => {
+    const tx = currentTransaction();
+    if (tx && lockedTransactions.has(tx.id)) return;
+
+    je.push(newLine());
+    renderJELines();
+  });
+
+  $("clearJE").addEventListener("click", () => {
+    const tx = currentTransaction();
+    if (tx && lockedTransactions.has(tx.id)) return;
+
+    je = [newLine(), newLine()];
+    renderJELines();
+    clearFeedback();
+  });
+
+  $("postJE").addEventListener("click", tryPostJE);
+  $("playAgainBtn").addEventListener("click", restartGame);
+}
+
+function init() {
+  gameTransactions = getRandomTransactions(TRANSACTIONS, 10);
+  txIndex = 0;
+  correctAnswers = 0;
+  answeredTransactions = new Set();
+  lockedTransactions = new Set();
+
+  updateScoreDisplay();
+  bindEvents();
+  renderTransaction();
+  renderJELines();
+  renderStatements();
+  clearFeedback();
+  hideResultsOverlay();
+}
+
+init();
