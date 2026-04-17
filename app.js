@@ -351,6 +351,9 @@ function updateButtonStates() {
   $("postJE").disabled = locked;
   $("addLine").disabled = locked;
   $("clearJE").disabled = locked;
+  $("nextTx").disabled = false;
+  $("nextTx").classList.toggle("primary");
+  $("nextTx").textContent = locked && answeredTransactions.size === gameTransactions.length ? "Finish Round" : "Next Question";
 }
 
 function resetJEForNextQuestion() {
@@ -436,12 +439,12 @@ function tryPostJE() {
 
   if (correct) {
     correctAnswers += 1;
-    $("feedback").textContent = `✅ Correct! ${tx.explain}`;
+    $("feedback").textContent = `✅ Correct! ${tx.explain} Review your entry, then click Next Question.`;
     $("feedback").className = "feedback success";
     postToLedger(cleanLines);
     renderStatements();
   } else {
-    $("feedback").textContent = `❌ Incorrect. ${tx.explain}`;
+    $("feedback").textContent = `❌ Incorrect. ${tx.explain} Review it, then click Next Question.`;
     $("feedback").className = "feedback error";
   }
 
@@ -449,13 +452,6 @@ function tryPostJE() {
   renderTransaction();
   renderJELines();
 
-  setTimeout(() => {
-    if (answeredTransactions.size === gameTransactions.length) {
-      finishGame();
-    } else {
-      moveToNextTransaction();
-    }
-  }, 1500);
 }
 
 function showGame() {
@@ -506,6 +502,21 @@ function bindEvents() {
   });
 
   $("postJE").addEventListener("click", tryPostJE);
+  $("nextTx").addEventListener("click", () => {
+    const tx = currentTransaction();
+    if (tx && !lockedTransactions.has(tx.id)) {
+      $("feedback").textContent = "Post this journal entry first, then click Next Question.";
+      $("feedback").className = "feedback";
+      return;
+    }
+
+    if (answeredTransactions.size === gameTransactions.length) {
+      finishGame();
+      return;
+    }
+
+    moveToNextTransaction();
+  });
   $("playAgainBtn").addEventListener("click", restartGame);
 }
 
